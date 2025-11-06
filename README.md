@@ -92,9 +92,12 @@ All configuration options live in `include/usb_pd_config.h`. Beyond target selec
 notable flags include:
 
 - `PD_CONFIG_MAX_PORT` – number of simultaneous PD ports
-- `PD_CONFIG_ALT_MODE_SUPPORT` – enable DisplayPort alt mode helpers
+- `PD_CONFIG_ALT_MODE_SUPPORT` / `PD_CONFIG_ALT_MODE_DP_SUPPORT` – enable
+  DisplayPort alt mode helpers
 - `PD_CONFIG_PD3_PPS_ENABLE` – toggle Programmable Power Supply support
-- `PD_CONFIG_ENABLE_DEBUG` – dumps state-machine traces for diagnostics
+- `PD_CONFIG_SOURCE_ROLE_ENABLE` / `PD_CONFIG_SINK_ROLE_ENABLE` – restrict the
+  advertised power/data roles
+- `PD_CONFIG_PD3_FAST_ROLE_SWAP_ENABLE` – opt-in to Fast Role Swap
 
 ## Documentation
 
