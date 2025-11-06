@@ -1,6 +1,7 @@
 # USB Power Delivery Stack for PTN5110
 
-![USB PD Stack Logo](images/usbpd-stack-logo.png)
+<!-- markdownlint-disable-next-line MD033 -->
+<img src="images/usbpd-stack-logo.png" alt="USB PD Stack Logo" width="160" />
 
 Open-source distribution of the NXP MCUXpresso USB Power Delivery stack with a modern
 build system, portable HAL adapters, and multi-platform examples maintained by
