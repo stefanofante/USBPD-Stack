@@ -1,25 +1,32 @@
 {
     "name": "usbpd-stack",
     "version": "0.1.0",
-    "description": "MCUXpresso USB Power Delivery stack with PTN5110 driver and ports for ESP32-S3 and Arduino.",
+    "description": "USB Power Delivery stack with PTN5110 driver and ports for ESP32-S3, Arduino and STM32.",
     "keywords": [
         "usb",
         "usb-c",
         "power-delivery",
         "ptn5110"
     ],
-    "license": "BSD-3-Clause",
+    "license": "BSD-3-Clause AND MIT",
     "frameworks": [
         "arduino",
         "espidf"
     ],
     "platforms": "*",
     "build": {
-        "srcDir": "pd",
-        "includeDir": "pd",
+        "srcDir": "src",
+        "includeDir": "include",
         "srcFilter": [
             "+<*>",
-            "-<compliance_test_report/>"
+            "+<../support/src>",
+            "+<../port/src>",
+            "+<../third_party/nxp_pd/src>"
+        ],
+        "flags": [
+            "-Isupport/include",
+            "-Iport/include",
+            "-Ithird_party/nxp_pd/include"
         ]
     }
 }
