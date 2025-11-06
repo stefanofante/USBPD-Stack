@@ -1,15 +1,26 @@
 # USB Power Delivery Stack for PTN5110
 
-<!-- markdownlint-disable-next-line MD033 -->
-<img src="images/usbpd-stack-logo.png" alt="USB PD Stack Logo" width="160" />
-
-Open-source distribution of the NXP MCUXpresso USB Power Delivery stack with a modern
-build system, portable HAL adapters, and multi-platform examples maintained by
-**Stefano Fante** (STLINE SRL).
-
-Originally derived from MCUXpresso middleware 25.06.00, this repository keeps the
-proven PTN5110 Type-C Port Controller (TCPC) driver while providing a streamlined
-structure for contemporary embedded toolchains.
+<!-- markdownlint-disable MD033 -->
+<table>
+  <tr>
+    <td style="width: 200px; vertical-align: top;">
+      <img src="images/usbpd-stack-logo.png" alt="USB PD Stack Logo" width="160" />
+    </td>
+    <td style="vertical-align: top;">
+      <p>
+        Open-source distribution of the NXP MCUXpresso USB Power Delivery stack with a modern
+        build system, portable HAL adapters, and multi-platform examples maintained by
+        <strong>Stefano Fante</strong> (STLINE SRL).
+      </p>
+      <p>
+        Originally derived from MCUXpresso middleware 25.06.00, this repository keeps the
+        proven PTN5110 Type-C Port Controller (TCPC) driver while providing a streamlined
+        structure for contemporary embedded toolchains.
+      </p>
+    </td>
+  </tr>
+</table>
+<!-- markdownlint-enable MD033 -->
 
 ## Highlights
 
