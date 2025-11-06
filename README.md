@@ -50,6 +50,8 @@ that describes the required MCU resources.
 └── LICENSE
 ```
 
+![USB PD Stack Architecture](images/USBPD-stack.png)
+
 ## Getting Started
 
 ### PlatformIO
