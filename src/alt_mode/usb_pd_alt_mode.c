@@ -6,6 +6,20 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file usb_pd_alt_mode.c
+ * @brief USB PD Alternate Mode framework implementation
+ * 
+ * @details Implements generic alternate mode state machine coordinating VDM discovery,
+ *          SVID exchange, mode enumeration, enter/exit sequences, and attention handling.
+ *          Manages up to 7 concurrent alternate mode modules with event queuing,
+ *          retry logic, and integration with policy engine via callback interface.
+ *          File size: ~948 lines.
+ * 
+ * @copyright Copyright 2017 NXP
+ * @license BSD-3-Clause
+ */
+
 #include <string.h>
 #include "usb_pd_config.h"
 #include "usb_pd.h"

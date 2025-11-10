@@ -5,6 +5,18 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file usb_pd_i2c.h
+ * @brief USB PD I2C communication wrapper interface
+ * 
+ * @details Provides hardware abstraction for I2C communication with PTN5110 TCPC.
+ *          Wraps platform-specific I2C drivers with unified PD stack interface.
+ *          Supports blocking/non-blocking transfers with retry logic and bus recovery.
+ * 
+ * @copyright Copyright 2019 NXP
+ * @license BSD-3-Clause
+ */
+
 #ifndef __USB_PD_I2C_H__
 #define __USB_PD_I2C_H__
 

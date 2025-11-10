@@ -1,8 +1,40 @@
-/*
- * Copyright 2015 - 2017 NXP
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+/**
+ * @file usb_pd_policy.c
+ * @brief USB PD Policy Engine State Machine Implementation
+ * 
+ * @details Implements the complete USB Power Delivery Policy Engine (PE) state machine
+ *          per USB PD 2.0/3.0 specification. This is the largest and most complex file
+ *          in the stack, containing ~9300 lines of state machine logic.
+ * 
+ *          Policy Engine responsibilities:
+ *          - Source policy: Send capabilities, evaluate requests, control VBUS
+ *          - Sink policy: Request power, evaluate source capabilities
+ *          - Swap protocols: PR_Swap, DR_Swap, VCONN_Swap, FR_Swap (Fast Role Swap)
+ *          - VDM handling: Structured/unstructured vendor defined messages
+ *          - Extended messages: PD 3.0 chunked message support
+ *          - Hard/soft reset recovery
+ *          - Cable discovery and communication (SOP'/SOP'')
+ *          - BIST (Built-In Self Test) modes
+ *          - PPS (Programmable Power Supply) support
+ * 
+ *          State machine organization:
+ *          - Primary state (psmCurState/psmNewState): Main PE state
+ *          - Secondary states (psmSecondaryState[]): VDM state machines
+ *          - Auto policy state: Automatic swap negotiation
+ * 
+ *          Key constants (USB PD spec):
+ *          - N_CAPS_COUNT: 50 - max source capability message retries
+ *          - N_HARD_RESET_COUNT: 2 - hard reset retry limit
+ *          - N_DISCOVER_IDENTITY_COUNTER: 20 - cable discovery retries
+ * 
+ *          This file integrates with:
+ *          - usb_pd_msg.c - message transmission/reception
+ *          - usb_pd_connect.c - Type-C connection management
+ *          - usb_pd_timer.c - protocol timing
+ *          - usb_pd_alt_mode.c - alternate mode entry/exit
+ * 
+ * @copyright Copyright 2015 - 2017 NXP. All rights reserved.
+ * @license SPDX-License-Identifier: BSD-3-Clause
  */
 
 #include <string.h>
@@ -8437,6 +8469,19 @@ uint8_t PD_PsmCheckVsafe5V(pd_instance_t *pdInstance)
 }
 
 /* 0 - timeout, other values - the remaining time. */
+/**
+ * @brief Wait for timer with event checking
+ * 
+ * Starts timer and waits for timeout or specified event. Handles disconnection
+ * and other PD events during wait. Useful for state machine delays with
+ * early exit on events.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] timrName Timer to start
+ * @param[in] timrTime Timer duration in ms
+ * @param[in] checkEvent Event mask to check for early exit
+ * @return Timer remaining time (0 if timed out)
+ */
 uint16_t PD_PsmTimerWait(pd_instance_t *pdInstance, tTimer_t timrName, uint16_t timrTime, uint32_t checkEvent)
 {
     uint32_t eventSet = 0;
@@ -8473,6 +8518,17 @@ uint16_t PD_PsmTimerWait(pd_instance_t *pdInstance, tTimer_t timrName, uint16_t 
 /*! ***************************************************************************
    task process related functions
 ******************************************************************************/
+/**
+ * @brief Process PD port task events
+ * 
+ * Handles event flags posted to PD task:
+ * - PHY_STATE_CHANGE: Update PHY state from TCPC
+ * - Clears non-critical events when state machine inactive (detached)
+ * - Preserves critical events (PHY state, FR_Swap) for processing
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] eventSet Event flags that are set
+ */
 void PD_PortTaskEventProcess(pd_instance_t *pdInstance, uint32_t eventSet)
 {
     if ((eventSet & (uint32_t)PD_TASK_EVENT_PHY_STATE_CHAGNE) != 0U)
@@ -8500,6 +8556,21 @@ void PD_PortTaskEventProcess(pd_instance_t *pdInstance, uint32_t eventSet)
     }
 }
 
+/**
+ * @brief Main PD stack state machine
+ * 
+ * Central coordinator for USB PD stack operation. Executes one iteration of:
+ * 1. Type-C connection state machine (PD_ConnectCheck)
+ * 2. VBUS discharge control based on connection state
+ * 3. Policy Engine state machine (PD_PsmProcessState)
+ * 4. Message reception handling
+ * 5. Auto policy state machine (if enabled)
+ * 6. DPM state machine integration
+ * 
+ * Called from PD_InstanceTask() or PD_Task() when events pending.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_StackStateMachine(pd_instance_t *pdInstance)
 {
     uint32_t taskEventSet = 0;
@@ -8765,17 +8836,42 @@ void PD_StackStateMachine(pd_instance_t *pdInstance)
 #endif
 }
 
+/**
+ * @brief Control VBUS discharge
+ * 
+ * Enables/disables VBUS discharge path via PHY control.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] enable 1 to enable discharge, 0 to disable
+ */
 void PD_DpmDischargeVbus(pd_instance_t *pdInstance, uint8_t enable)
 {
     (void)PD_PhyControl(pdInstance, PD_PHY_DISCHARGE_VBUS, &enable);
 }
 
 #if defined(PD_CONFIG_VCONN_SUPPORT) && (PD_CONFIG_VCONN_SUPPORT)
+/**
+ * @brief Control VCONN discharge
+ * 
+ * Enables/disables VCONN discharge path via PHY control.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] enable 1 to enable discharge, 0 to disable
+ */
 void PD_DpmDischargeVconn(pd_instance_t *pdInstance, uint8_t enable)
 {
     (void)PD_PhyControl(pdInstance, PD_PHY_DISCHARGE_VCONN, &enable);
 }
 
+/**
+ * @brief Control VCONN output
+ * 
+ * Enables/disables VCONN sourcing via application callback.
+ * Only functional if VCONN support enabled in port configuration.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] enable 1 to enable VCONN, 0 to disable
+ */
 void PD_DpmSetVconn(pd_instance_t *pdInstance, uint8_t enable)
 {
     if ((pdInstance->pdPowerPortConfig->vconnSupported != 0U) && (pdInstance->callbackFns->PD_ControlVconn != NULL))
@@ -9294,6 +9390,16 @@ pd_status_t PD_Control(pd_handle pdHandle, uint32_t controlCode, void *param)
     return status;
 }
 
+/**
+ * @brief Alternate mode DPM callback forwarder
+ * 
+ * Forwards alternate mode events from alt mode layer to application
+ * callback. Provides abstraction layer between alt mode and DPM.
+ * 
+ * @param[in] pdHandle PD instance handle
+ * @param[in] event DPM callback event type
+ * @param[in] param Event-specific parameter
+ */
 void PD_DpmAltModeCallback(pd_handle pdHandle, pd_dpm_callback_event_t event, void *param)
 {
     (void)((pd_instance_t *)(pdHandle))->pdCallback(((pd_instance_t *)(pdHandle))->callbackParam, event, param);

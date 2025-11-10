@@ -1,3 +1,14 @@
+/**
+ * @file fsl_adapter_gpio_arduino.cpp
+ * @brief GPIO HAL adapter for Arduino platforms
+ * 
+ * @details Implements platform-independent GPIO abstraction using Arduino
+ *          pinMode/digitalWrite/digitalRead/attachInterrupt APIs.
+ * 
+ * @author Stefano Fante (STLINE SRL)
+ * @date 2025
+ */
+
 #include "support/fsl_adapter_gpio.h"
 
 #if defined(PD_CONFIG_TARGET_ARDUINO) && (PD_CONFIG_TARGET_ARDUINO)
@@ -5,28 +16,39 @@
 #include <Arduino.h>
 #include <stdlib.h>
 
+/**
+ * @brief Internal GPIO handle structure for Arduino
+ */
 struct _hal_gpio_handle
 {
-    int pin;
-    hal_gpio_direction_t direction;
-    hal_gpio_interrupt_trigger_t trigger;
-    hal_gpio_callback_t callback;
-    void *callbackParam;
-    bool callbackAttached;
-    int8_t interruptSlot;
+    int pin;                             /**< Arduino pin number */
+    hal_gpio_direction_t direction;      /**< Input or output direction */
+    hal_gpio_interrupt_trigger_t trigger; /**< Interrupt trigger type */
+    hal_gpio_callback_t callback;        /**< User callback for interrupts */
+    void *callbackParam;                 /**< User parameter for callback */
+    bool callbackAttached;               /**< True if interrupt is attached */
+    int8_t interruptSlot;                /**< Index into global dispatcher array */
 };
 
 namespace
 {
+/** @brief Maximum number of concurrent GPIO interrupts */
 constexpr uint8_t kMaxInterruptSlots = 8;
 
+/**
+ * @brief Interrupt slot binding handle to dispatcher
+ */
 struct InterruptSlot
 {
-    _hal_gpio_handle *handle;
+    _hal_gpio_handle *handle;  /**< Handle for this slot */
 };
 
+/** @brief Global interrupt slot registry */
 InterruptSlot s_interruptSlots[kMaxInterruptSlots] = {};
 
+/**
+ * @brief Generate static ISR dispatcher for a specific slot index
+ */
 #define DECLARE_DISPATCHER(index)                               \
     static void PD_GpioIsrDispatcher##index(void)               \
     {                                                           \
@@ -47,6 +69,7 @@ DECLARE_DISPATCHER(5)
 DECLARE_DISPATCHER(6)
 DECLARE_DISPATCHER(7)
 
+/** @brief Array of function pointers for attachInterrupt() */
 static void (*const s_dispatchers[kMaxInterruptSlots])(void) = {
     PD_GpioIsrDispatcher0,
     PD_GpioIsrDispatcher1,
@@ -58,6 +81,13 @@ static void (*const s_dispatchers[kMaxInterruptSlots])(void) = {
     PD_GpioIsrDispatcher7,
 };
 
+/**
+ * @brief Map HAL trigger mode to Arduino interrupt mode
+ * 
+ * @param[in] trigger HAL interrupt trigger enumeration
+ * @param[out] mode Arduino interrupt mode (RISING, FALLING, CHANGE, etc.)
+ * @return kStatus_HAL_GpioSuccess on success
+ */
 hal_gpio_status_t MapTriggerToArduino(hal_gpio_interrupt_trigger_t trigger, int &mode)
 {
     switch (trigger)
@@ -85,6 +115,12 @@ hal_gpio_status_t MapTriggerToArduino(hal_gpio_interrupt_trigger_t trigger, int 
     }
 }
 
+/**
+ * @brief Allocate a free interrupt slot
+ * 
+ * @param[in] handle GPIO handle to bind
+ * @return Slot index (0-7) or -1 if no slots available
+ */
 int8_t AllocateInterruptSlot(_hal_gpio_handle *handle)
 {
     for (uint8_t i = 0; i < kMaxInterruptSlots; ++i)
@@ -98,6 +134,11 @@ int8_t AllocateInterruptSlot(_hal_gpio_handle *handle)
     return -1;
 }
 
+/**
+ * @brief Free an interrupt slot
+ * 
+ * @param[in] slotIndex Slot index to free
+ */
 void FreeInterruptSlot(int8_t slotIndex)
 {
     if ((slotIndex >= 0) && (slotIndex < static_cast<int8_t>(kMaxInterruptSlots)))
@@ -110,6 +151,15 @@ void FreeInterruptSlot(int8_t slotIndex)
 
 extern "C" {
 
+/**
+ * @brief Initialize a GPIO pin
+ * 
+ * @param[in,out] handle Pointer to GPIO handle (will be allocated)
+ * @param[in] config Pin configuration
+ * @return kStatus_HAL_GpioSuccess on success
+ * 
+ * @details Calls pinMode() and digitalWrite() for output pins.
+ */
 hal_gpio_status_t HAL_GpioInit(hal_gpio_handle_t *handle, const hal_gpio_pin_config_t *config)
 {
     if ((handle == NULL) || (config == NULL) || (*handle != NULL))
@@ -171,6 +221,14 @@ hal_gpio_status_t HAL_GpioInit(hal_gpio_handle_t *handle, const hal_gpio_pin_con
     return kStatus_HAL_GpioSuccess;
 }
 
+/**
+ * @brief Deinitialize a GPIO pin
+ * 
+ * @param[in,out] handle Pointer to GPIO handle (will be freed)
+ * @return kStatus_HAL_GpioSuccess on success
+ * 
+ * @details Calls detachInterrupt() and frees memory.
+ */
 hal_gpio_status_t HAL_GpioDeinit(hal_gpio_handle_t *handle)
 {
     if ((handle == NULL) || (*handle == NULL))
@@ -191,6 +249,16 @@ hal_gpio_status_t HAL_GpioDeinit(hal_gpio_handle_t *handle)
     return kStatus_HAL_GpioSuccess;
 }
 
+/**
+ * @brief Install an interrupt callback
+ * 
+ * @param[in] handle Pointer to GPIO handle
+ * @param[in] callback Callback function
+ * @param[in] param User parameter
+ * @return kStatus_HAL_GpioSuccess on success
+ * 
+ * @details Allocates an interrupt slot and prepares for attachInterrupt().
+ */
 hal_gpio_status_t HAL_GpioInstallCallback(hal_gpio_handle_t *handle, hal_gpio_callback_t callback, void *param)
 {
     if ((handle == NULL) || (*handle == NULL))
@@ -234,6 +302,15 @@ hal_gpio_status_t HAL_GpioInstallCallback(hal_gpio_handle_t *handle, hal_gpio_ca
     return kStatus_HAL_GpioSuccess;
 }
 
+/**
+ * @brief Set GPIO interrupt trigger mode
+ * 
+ * @param[in] handle Pointer to GPIO handle
+ * @param[in] triggerMode Trigger mode (rising, falling, change, etc.)
+ * @return kStatus_HAL_GpioSuccess on success
+ * 
+ * @details Calls attachInterrupt() or detachInterrupt() based on trigger mode.
+ */
 hal_gpio_status_t HAL_GpioSetTriggerMode(hal_gpio_handle_t *handle, hal_gpio_interrupt_trigger_t triggerMode)
 {
     if ((handle == NULL) || (*handle == NULL))
@@ -269,6 +346,13 @@ hal_gpio_status_t HAL_GpioSetTriggerMode(hal_gpio_handle_t *handle, hal_gpio_int
     return kStatus_HAL_GpioSuccess;
 }
 
+/**
+ * @brief Configure wake-up functionality (stub for Arduino)
+ * 
+ * @param[in] handle Pointer to GPIO handle
+ * @param[in] enable Enable (1) or disable (0) wake-up
+ * @return kStatus_HAL_GpioSuccess (no-op on Arduino)
+ */
 hal_gpio_status_t HAL_GpioWakeUpSetting(hal_gpio_handle_t *handle, uint8_t enable)
 {
     (void)handle;
@@ -276,6 +360,15 @@ hal_gpio_status_t HAL_GpioWakeUpSetting(hal_gpio_handle_t *handle, uint8_t enabl
     return kStatus_HAL_GpioSuccess;
 }
 
+/**
+ * @brief Read the current logic level of a GPIO input
+ * 
+ * @param[in] handle Pointer to GPIO handle
+ * @param[out] value Pointer to receive the value (0 or 1)
+ * @return kStatus_HAL_GpioSuccess on success
+ * 
+ * @details Calls Arduino digitalRead().
+ */
 hal_gpio_status_t HAL_GpioGetInput(hal_gpio_handle_t *handle, uint8_t *value)
 {
     if ((handle == NULL) || (*handle == NULL) || (value == NULL))

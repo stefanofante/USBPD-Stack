@@ -6,6 +6,20 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file usb_pd_alt_mode_dp.c
+ * @brief DisplayPort Alternate Mode implementation
+ * 
+ * @details Implements VESA DisplayPort Alt Mode state machine handling discovery,
+ *          capability negotiation, enter/exit, status/configure VDM sequences.
+ *          Manages HPD signaling queue, pin assignment selection, multi-function
+ *          modes (DP-only, USB+DP), and DFP/UFP role-specific behavior.
+ *          File size: ~1534 lines.
+ * 
+ * @copyright Copyright 2017 NXP
+ * @license BSD-3-Clause
+ */
+
 #include <string.h>
 #include "usb_pd_config.h"
 #include "usb_pd.h"

@@ -1,8 +1,33 @@
-/*
- * Copyright 2016 - 2017 NXP
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+/**
+ * @file usb_pd_interface.h
+ * @brief USB PD Stack Interface Definitions and API
+ * 
+ * @details This header defines the core USB PD stack interface including:
+ *          - PD instance structure containing complete state machine context
+ *          - Task event definitions for PD event-driven architecture
+ *          - TCPC register cache structure for I2C optimization
+ *          - Auto policy state machine for automatic PD negotiation
+ *          - Connection state tracking and management
+ *          - API declarations for stack initialization, task scheduling, PHY control
+ * 
+ *          The pd_instance_t structure is the central data container holding:
+ *          - Physical layer interface (PTN5110/PTN5100 TCPC)
+ *          - Timer state (bitmap arrays for 46 timers)
+ *          - Message buffers (send/receive with extended message support)
+ *          - Policy engine state (PSM states, auto policy, VDM handling)
+ *          - Type-C connection state (CC monitoring, role tracking)
+ *          - Power delivery state (PDOs, RDO, explicit contract flags)
+ * 
+ *          Event-driven architecture uses OSA event flags to coordinate:
+ *          - Hard reset reception
+ *          - PD message arrival
+ *          - DPM command requests
+ *          - Message send completion
+ *          - Timer expiration
+ *          - PHY state changes
+ * 
+ * @copyright Copyright 2016 - 2017 NXP. All rights reserved.
+ * @license SPDX-License-Identifier: BSD-3-Clause
  */
 
 #ifndef __PD_INTERFACE_H__
@@ -28,106 +53,179 @@
 #define PD_CONFIG_VENDOR_DEFINED_MESSAGE_ENABLE (1U)
 #endif
 
+/** @brief Number of secondary PSM states for VDM handling */
 #define PSM_SECONDARY_STATE_COUNT (3U)
 
+/** @brief Debug accessory role configuration */
 #define PD_CONFIG_DEBUG_ACCESSORY_ROLE (CONFIG_DEBUG_ACCESSORY_DTS)
 
+/** @brief PD task event wait time (wait forever) */
 #define PD_WAIT_EVENT_TIME (osaWaitForever_c)
 
+/** @brief Cable discovery identity retry count */
 #define PD_TRY_GET_CABLE_INFO_COUNT (3U)
 
 /* private */
 
-/* pd_task_event_type_t */
+/* pd_task_event_type_t - Event flags for PD task coordination */
+
+/** @brief Hard reset received event flag */
 #define PD_TASK_EVENT_RECEIVED_HARD_RESET   (0x01U)
+
+/** @brief PD message received event flag */
 #define PD_TASK_EVENT_PD_MSG                (0x02U)
+
+/** @brief DPM command request event flag */
 #define PD_TASK_EVENT_DPM_MSG               (0x04U)
+
+/** @brief Message send complete event flag */
 #define PD_TASK_EVENT_SEND_DONE             (0x08U)
+
+/** @brief Timer timeout event flag */
 #define PD_TASK_EVENT_TIME_OUT              (0x10U)
+
+/** @brief PHY state change event flag (typo: CHAGNE) */
 #define PD_TASK_EVENT_PHY_STATE_CHAGNE      (0x20U)
+
+/** @brief Other miscellaneous event flag */
 #define PD_TASK_EVENT_OTHER                 (0x40U)
+
+/** @brief Fast role swap signal received event flag */
 #define PD_TASK_EVENT_FR_SWAP_SINGAL        (0x80U)
+
+/** @brief VBUS sink disconnect detected event flag */
 #define PD_TASK_EVENT_VBUS_SINK_DISCONNECT  (0x100U)
+
+/** @brief Configuration reset event flag */
 #define PD_TASK_EVENT_RESET_CONFIGURE       (0x200U)
+
+/** @brief External power change event flag */
 #define PD_TASK_EVENT_EXTERNAL_POWER_CHANGE (0x400U)
+
+/** @brief All events mask */
 #define PD_TASK_EVENT_ALL                   (0xFFFFU)
 
+/**
+ * @brief Debug accessory role types
+ * 
+ * Defines the role of debug accessory per Type-C specification.
+ */
 typedef enum
 {
-    CONFIG_DEBUG_ACCESSORY_NONE = 0,
-    CONFIG_DEBUG_ACCESSORY_TS   = 1,
-    CONFIG_DEBUG_ACCESSORY_DTS  = 2,
+    CONFIG_DEBUG_ACCESSORY_NONE = 0, /**< No debug accessory */
+    CONFIG_DEBUG_ACCESSORY_TS   = 1, /**< Debug accessory with Test Support (TS) */
+    CONFIG_DEBUG_ACCESSORY_DTS  = 2, /**< Debug accessory with Data Through Support (DTS) */
 } pd_debug_acc_role_t;
 
+/**
+ * @brief Automatic policy state machine states
+ * 
+ * State machine for automatic PD policy negotiation including power role swap,
+ * data role swap, and VCONN swap operations. Runs in ready state to optimize
+ * power delivery configuration.
+ */
 typedef enum _pd_auto_policy_state
 {
-    PSM_RDY_EVAL_INIT = 0,
-    PSM_RDY_EVAL_GET_SNK_CAP,
-    PSM_RDY_EVAL_CHECK_PARTNER_CAP,
-    PSM_RDY_EVAL_SWAP_TO_SRC,
-    PSM_RDY_EVAL_CHECK_SWAP_TO_SRC,
-    PSM_RDY_EVAL_SWAP_TO_SNK,
-    PSM_RDY_EVAL_CHECK_SWAP_TO_SNK,
-    PSM_RDY_EVAL_DR_SWAP,
-    PSM_RDY_EVAL_CHECK_DR_SWAP,
-    PSM_RDY_EVAL_VCONN_SWAP,
-    PSM_RDY_EVAL_CHECK_VCONN_SWAP,
-    PSM_RDY_EVAL_IDLE,
-    PSM_RDY_DELAY_FLAG = 0x80, /* Delay before each step. */
+    PSM_RDY_EVAL_INIT = 0,          /**< Initialize auto policy evaluation */
+    PSM_RDY_EVAL_GET_SNK_CAP,       /**< Get sink capabilities from partner */
+    PSM_RDY_EVAL_CHECK_PARTNER_CAP, /**< Check partner capabilities */
+    PSM_RDY_EVAL_SWAP_TO_SRC,       /**< Initiate power role swap to source */
+    PSM_RDY_EVAL_CHECK_SWAP_TO_SRC, /**< Check swap to source result */
+    PSM_RDY_EVAL_SWAP_TO_SNK,       /**< Initiate power role swap to sink */
+    PSM_RDY_EVAL_CHECK_SWAP_TO_SNK, /**< Check swap to sink result */
+    PSM_RDY_EVAL_DR_SWAP,           /**< Initiate data role swap */
+    PSM_RDY_EVAL_CHECK_DR_SWAP,     /**< Check data role swap result */
+    PSM_RDY_EVAL_VCONN_SWAP,        /**< Initiate VCONN swap */
+    PSM_RDY_EVAL_CHECK_VCONN_SWAP,  /**< Check VCONN swap result */
+    PSM_RDY_EVAL_IDLE,              /**< Auto policy idle state */
+    PSM_RDY_DELAY_FLAG = 0x80,      /**< Delay flag before each step */
 } pd_auto_policy_state_t;
 
+/**
+ * @brief Connection state enumeration
+ * 
+ * Indicates the stability and validity of Type-C connection.
+ */
 typedef enum _pd_connect_state
 {
-    kConnectState_NotStable,
-    kConnectState_Connected,
-    kConnectState_Disconnected,
+    kConnectState_NotStable,    /**< Connection not yet stable */
+    kConnectState_Connected,    /**< Stably connected */
+    kConnectState_Disconnected, /**< Disconnected state */
 } pd_connect_state_t;
 
+/**
+ * @brief TCPC register cache structure
+ * 
+ * Caches frequently accessed TCPC registers to minimize I2C transactions
+ * and improve performance. Organized by register functional groups.
+ */
 typedef struct
 {
     struct
     {
-        uint16_t vendor_id;
-        uint16_t product_id;
-        uint16_t device_id;
-        uint16_t usbtypec_rev;
-        uint16_t usbpd_rev_ver;
-        uint16_t pd_interface_rev;
+        uint16_t vendor_id;         /**< Vendor ID register */
+        uint16_t product_id;        /**< Product ID register */
+        uint16_t device_id;         /**< Device ID register */
+        uint16_t usbtypec_rev;      /**< USB Type-C revision register */
+        uint16_t usbpd_rev_ver;     /**< USB PD revision/version register */
+        uint16_t pd_interface_rev;  /**< PD interface revision register */
     } GLOBAL;
     struct
     {
-        uint16_t alert;
+        uint16_t alert;             /**< Alert register */
     } INTERRUPT;
     struct
     {
-        uint16_t alert_mask;
-        uint8_t alert_extended_mask;
-        uint8_t power_status_mask;
+        uint16_t alert_mask;           /**< Alert mask register */
+        uint8_t alert_extended_mask;   /**< Extended alert mask register */
+        uint8_t power_status_mask;     /**< Power status mask register */
     } MASK;
     struct
     {
-        uint8_t receive_detect;
+        uint8_t receive_detect;     /**< Receive detect register */
     } MSG_RX;
     struct
     {
-        uint8_t tcpc_control;
-        uint8_t role_control;
-        uint8_t fault_control;
-        uint8_t power_control;
+        uint8_t tcpc_control;       /**< TCPC control register */
+        uint8_t role_control;       /**< Role control register */
+        uint8_t fault_control;      /**< Fault control register */
+        uint8_t power_control;      /**< Power control register */
     } CONTROL;
     struct
     {
-        uint8_t cc_status;
-        uint8_t power_status;
-        uint8_t fault_status;
-        uint8_t extended_status;
+        uint8_t cc_status;          /**< CC status register */
+        uint8_t power_status;       /**< Power status register */
+        uint8_t fault_status;       /**< Fault status register */
+        uint8_t extended_status;    /**< Extended status register */
     } STATUS;
     struct
     {
-        uint16_t vbus_sink_disconnect_threshold;
+        uint16_t vbus_sink_disconnect_threshold; /**< VBUS sink disconnect threshold */
     } VBUS;
 } pd_phy_TCPC_reg_cache_t;
 
+/**
+ * @brief PD stack instance structure
+ * 
+ * Complete context for a single USB PD port instance. Contains all state machine
+ * variables, message buffers, timer state, configuration, and callback references.
+ * This is the central data structure passed to all PD stack API functions.
+ * 
+ * Memory layout optimized for:
+ * - Fast event-driven processing (event handle at top)
+ * - Minimal I2C overhead (TCPC register cache)
+ * - Efficient timer handling (bitmap arrays for 46 timers)
+ * - Extended message support (up to 266-byte messages)
+ * 
+ * Key functional areas:
+ * - Configuration: pdConfig, pdPowerPortConfig, phyInterface
+ * - Event coordination: taskEventHandle, taskWaitTime
+ * - Message handling: receivingData, sendingData, message state flags
+ * - Timer management: timrsRunningState, timrsTimeOutState, timrsTimeValue
+ * - Policy state: psmCurState, psmNewState, auto policy state
+ * - Type-C connection: curConnectState, ccUsed, raPresent
+ * - Power delivery: rdoRequest, partnerSourcePDOs, explicit contract flags
+ */
 typedef struct _pd_instance
 {
 #if ((defined PD_CONFIG_ALT_MODE_SUPPORT) && (PD_CONFIG_ALT_MODE_SUPPORT))
@@ -372,27 +470,159 @@ typedef struct _pd_instance
  ******************************************************************************/
 
 /* usb_pd_interface */
+
+/**
+ * @brief Check if PD stack has pending events
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return 1 if events are pending, 0 if no events
+ */
 uint8_t PD_StackHasPendingEvent(pd_instance_t *pdInstance);
+
+/**
+ * @brief Set event flag for PD task
+ * 
+ * Posts an event to the PD task event handle to trigger state machine processing.
+ * Used throughout the stack to signal message reception, timer expiration, etc.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] event Event flag bits (see PD_TASK_EVENT_* defines)
+ */
 void PD_StackSetEvent(pd_instance_t *pdInstance, uint32_t event);
+
+/**
+ * @brief Control physical layer operations
+ * 
+ * Generic PHY control interface for operations like enabling interrupts,
+ * updating state, controlling VBUS/VCONN, etc.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] control PHY control command
+ * @param[in,out] param Command-specific parameter
+ * @return kStatus_PD_Success on success, error code otherwise
+ */
 pd_status_t PD_PhyControl(pd_instance_t *pdInstance, pd_phy_control_t control, void *param);
+
+/**
+ * @brief Blocking microsecond delay
+ * 
+ * Busy-wait delay for short timing requirements. Weak function that can be
+ * overridden with platform-specific implementation.
+ * 
+ * @param[in] us Delay duration in microseconds
+ */
 void PD_WaitUsec(uint32_t us);
 
 /* usb_pd_connect */
+
+/**
+ * @brief Set VBUS power state progress
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] state VBUS power progress state
+ */
 void PD_ConnectSetPowerProgress(pd_instance_t *pdInstance, pd_vbus_power_progress_t state);
+
+/**
+ * @brief Get initial Type-C role state
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return Initial Type-C state based on configuration
+ */
 TypeCState_t PD_ConnectGetInitRoleState(pd_instance_t *pdInstance);
+
+/**
+ * @brief Initialize Type-C role state machine
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] errorRecovery 1 if initializing from error recovery, 0 otherwise
+ */
 void PD_ConnectInitRole(pd_instance_t *pdInstance, uint8_t errorRecovery);
+
+/**
+ * @brief Set power role after power role swap
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] powerRole New power role (source/sink)
+ */
 void PD_ConnectSetPRSwapRole(pd_instance_t *pdInstance, pd_power_role_t powerRole);
+
+/**
+ * @brief Handle alternate mode entry failure
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] pdConnected 1 if PD connected, 0 otherwise
+ */
 void PD_ConnectAltModeEnterFail(pd_instance_t *pdInstance, uint8_t pdConnected);
+
+/**
+ * @brief Get connection state
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return Connection state (stable/connected/disconnected)
+ */
 pd_connect_state_t PD_ConnectState(pd_instance_t *pdInstance);
+
+/**
+ * @brief Check and update connection state
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return Updated connection state
+ */
 pd_connect_state_t PD_ConnectCheck(pd_instance_t *pdInstance);
+
+/**
+ * @brief Get current Type-C state machine state
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return Current Type-C state
+ */
 TypeCState_t PD_ConnectGetStateMachine(pd_instance_t *pdInstance);
 
 /* usb_pd_msg */
+
+/**
+ * @brief Reset message handling subsystem
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgReset(pd_instance_t *pdInstance);
+
+/**
+ * @brief Notify message send completion
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] result Send result status
+ */
 void PD_MsgSendDone(pd_instance_t *pdInstance, pd_status_t result);
+
+/**
+ * @brief Send PD message
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] sop Start of packet type (SOP/SOP'/SOP'')
+ * @param[in] msgType Message type
+ * @param[in] dataLength Data object count
+ * @param[in] dataBuffer Pointer to data objects
+ * @return kStatus_PD_Success on success, error code otherwise
+ */
 pd_status_t PD_MsgSend(
     pd_instance_t *pdInstance, start_of_packet_t sop, message_type_t msgType, uint32_t dataLength, uint8_t *dataBuffer);
+
 #if (defined PD_CONFIG_EXTENDED_MSG_SUPPORT) && (PD_CONFIG_EXTENDED_MSG_SUPPORT)
+/**
+ * @brief Send extended PD message (up to 266 bytes)
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] sop Start of packet type
+ * @param[in] extMsgType Extended message type
+ * @param[in] dataLength Total data length
+ * @param[in] dataBuffer Pointer to data buffer
+ * @param[in] dataSize Size of this chunk
+ * @param[in] requestChunk 1 if requesting chunk, 0 otherwise
+ * @param[in] chunkNumber Current chunk number
+ * @return kStatus_PD_Success on success, error code otherwise
+ */
 pd_status_t PD_MsgSendExtendedMsg(pd_instance_t *pdInstance,
                                   start_of_packet_t sop,
                                   message_type_t extMsgType,
@@ -402,40 +632,195 @@ pd_status_t PD_MsgSendExtendedMsg(pd_instance_t *pdInstance,
                                   uint8_t requestChunk,
                                   uint8_t chunkNumber);
 #endif /* PD_CONFIG_EXTENDED_MSG_SUPPORT */
+
 #if ((defined PD_CONFIG_VENDOR_DEFINED_MESSAGE_ENABLE) && (PD_CONFIG_VENDOR_DEFINED_MESSAGE_ENABLE)) || \
     (defined(PD_CONFIG_CABLE_COMMUNICATION_ENABLE) && (PD_CONFIG_CABLE_COMMUNICATION_ENABLE)) ||        \
     (defined(PD_CONFIG_SRC_AUTO_DISCOVER_CABLE_PLUG) && (PD_CONFIG_SRC_AUTO_DISCOVER_CABLE_PLUG))
+/**
+ * @brief Send structured VDM (Vendor Defined Message)
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] sop Start of packet type
+ * @param[in] reponseVdmHeader VDM header structure
+ * @param[in] count Number of VDOs (data objects)
+ * @param[in] vdos Pointer to VDO array
+ * @return kStatus_PD_Success on success, error code otherwise
+ */
 pd_status_t PD_MsgSendStructuredVDM(pd_instance_t *pdInstance,
                                     start_of_packet_t sop,
                                     pd_structured_vdm_header_t reponseVdmHeader,
                                     uint8_t count,
                                     uint32_t *vdos);
 #endif /* PD_CONFIG_VENDOR_DEFINED_MESSAGE_ENABLE */
+
+/**
+ * @brief Handle hard reset reception
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgReceivedHardReset(pd_instance_t *pdInstance);
+
+/**
+ * @brief Send hard reset or cable reset
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] hardResetOrCableReset 1 for hard reset, 0 for cable reset
+ */
 void PD_MsgSendHardOrCableReset(pd_instance_t *pdInstance, uint8_t hardResetOrCableReset);
+
+/**
+ * @brief Process received message from PHY
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] rxResult RX result structure from PHY
+ */
 void PD_MsgReceived(pd_instance_t *pdInstance, pd_phy_rx_result_t *rxResult);
+
+/**
+ * @brief Stop message reception
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgStopReceive(pd_instance_t *pdInstance);
+
+/**
+ * @brief Start message reception
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgStartReceive(pd_instance_t *pdInstance);
+
+/**
+ * @brief Check for received messages
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgReceive(pd_instance_t *pdInstance);
+
+/**
+ * @brief Get receive result status
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return Receive result status
+ */
 uint8_t PD_MsgGetReceiveResult(pd_instance_t *pdInstance);
+
+/**
+ * @brief Check if message receive is pending
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return 1 if receive pending, 0 otherwise
+ */
 uint8_t PD_MsgRecvPending(pd_instance_t *pdInstance);
+
 #if defined(PD_CONFIG_PD3_AMS_COLLISION_AVOID_ENABLE) && (PD_CONFIG_PD3_AMS_COLLISION_AVOID_ENABLE)
+/**
+ * @brief Check if source can start AMS (Atomic Message Sequence)
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return 1 if can start, 0 otherwise
+ */
 uint8_t PD_MsgSrcStartCommand(pd_instance_t *pdInstance);
+
+/**
+ * @brief End source AMS command
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgSrcEndCommand(pd_instance_t *pdInstance);
+
+/**
+ * @brief Check if sink can start command (collision avoidance)
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] command DPM command to check
+ * @return 1 if can start, 0 otherwise
+ */
 uint8_t PD_MsgSnkCheckStartCommand(pd_instance_t *pdInstance, pd_command_t command);
 #endif /* PD_CONFIG_PD3_AMS_COLLISION_AVOID_ENABLE */
 
 /* usb_pd_policy */
+
+/**
+ * @brief Check if VBUS is at vSafe0V
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return 1 if at vSafe0V, 0 otherwise
+ */
 uint8_t PD_PsmCheckVsafe0V(pd_instance_t *pdInstance);
+
+/**
+ * @brief Check if VBUS is at vSafe5V
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return 1 if at vSafe5V, 0 otherwise
+ */
 uint8_t PD_PsmCheckVsafe5V(pd_instance_t *pdInstance);
+
+/**
+ * @brief Wait for timer with event checking
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] timrName Timer identifier
+ * @param[in] timrTime Timer duration in ms
+ * @param[in] checkEvent Event mask to check during wait
+ * @return Timer remaining time or 0 if timeout/event occurred
+ */
 uint16_t PD_PsmTimerWait(pd_instance_t *pdInstance, tTimer_t timrName, uint16_t timrTime, uint32_t checkEvent);
+
+/**
+ * @brief Process port task events
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] eventSet Event flags that are set
+ */
 void PD_PortTaskEventProcess(pd_instance_t *pdInstance, uint32_t eventSet);
+
+/**
+ * @brief Main PD stack state machine
+ * 
+ * Executes one iteration of Type-C connection detection and PD policy engine.
+ * Should be called from PD task when events are pending.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_StackStateMachine(pd_instance_t *pdInstance);
+
+/**
+ * @brief Control VBUS discharge
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] enable 1 to enable discharge, 0 to disable
+ */
 void PD_DpmDischargeVbus(pd_instance_t *pdInstance, uint8_t enable);
+
 #if defined(PD_CONFIG_VCONN_SUPPORT) && (PD_CONFIG_VCONN_SUPPORT)
+/**
+ * @brief Control VCONN discharge
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] enable 1 to enable discharge, 0 to disable
+ */
 void PD_DpmDischargeVconn(pd_instance_t *pdInstance, uint8_t enable);
+
+/**
+ * @brief Control VCONN output
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] enable 1 to enable VCONN, 0 to disable
+ */
 void PD_DpmSetVconn(pd_instance_t *pdInstance, uint8_t enable);
 #endif /* PD_CONFIG_VCONN_SUPPORT */
+
+/**
+ * @brief Alternate mode DPM callback
+ * 
+ * Called by alternate mode layer to notify DPM of events.
+ * 
+ * @param[in] pdHandle PD instance handle
+ * @param[in] event DPM callback event type
+ * @param[in] param Event-specific parameter
+ */
 void PD_DpmAltModeCallback(pd_handle pdHandle, pd_dpm_callback_event_t event, void *param);
 
 #endif /* __PD_INTERFACE_H__ */

@@ -6,6 +6,19 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file usb_pd_alt_mode.h
+ * @brief USB PD Alternate Mode framework interface
+ * 
+ * @details Provides generic alternate mode support framework for USB PD.
+ *          Manages multiple alternate mode modules (up to 7) with structured/unstructured
+ *          VDM handling, discovery, enter/exit sequences, and attention processing.
+ *          Acts as mediator between policy engine and mode-specific implementations.
+ * 
+ * @copyright Copyright 2017 NXP
+ * @license BSD-3-Clause
+ */
+
 #ifndef __USB_PD_ALT_MODE_H__
 #define __USB_PD_ALT_MODE_H__
 

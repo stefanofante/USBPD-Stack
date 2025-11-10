@@ -1,8 +1,38 @@
-/*
- * Copyright 2016 - 2017 NXP
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+/**
+ * @file usb_pd_spec.h
+ * @brief USB Power Delivery Specification Definitions
+ * 
+ * @details Defines constants, enumerations, and structures per USB PD specification.
+ *          Covers USB PD 2.0/3.0 message formats, data objects, and protocol structures.
+ * 
+ *          Message header format (16-bit):
+ *          - Bits 0-4: Message type
+ *          - Bit 5: Port data role (UFP/DFP)
+ *          - Bits 6-7: Spec revision (PD 2.0/3.0)
+ *          - Bit 8: Port power role (Source/Sink)
+ *          - Bits 9-11: Message ID
+ *          - Bits 12-14: Number of data objects
+ *          - Bit 15: Extended message flag
+ * 
+ *          Extended message header (16-bit):
+ *          - Bits 0-8: Data size (0-260 bytes)
+ *          - Bit 10: Request chunk
+ *          - Bits 11-14: Chunk number
+ *          - Bit 15: Chunked flag
+ * 
+ *          Message types:
+ *          - Control messages (0x00-0x1F): No data objects
+ *          - Data messages (0x80-0x8F): 1-7 data objects
+ *          - Extended messages (0xC0-0xCF): Chunked data up to 260 bytes
+ * 
+ *          Key data objects:
+ *          - Power Data Objects (PDO): Source/Sink capabilities
+ *          - Request Data Object (RDO): Power request
+ *          - Vendor Defined Objects (VDO): Structured/unstructured VDM
+ *          - Battery/Alert/PPS objects: PD 3.0 extended features
+ * 
+ * @copyright Copyright 2016 - 2017 NXP. All rights reserved.
+ * @license SPDX-License-Identifier: BSD-3-Clause
  */
 
 #ifndef __PD_SPEC_H__
@@ -12,93 +42,147 @@
  * Definitions
  ******************************************************************************/
 
+/* Message Header Bit Field Definitions */
+
+/** @brief Number of data objects position in message header */
 #define PD_MSG_HEADER_NUMBER_OF_DATA_OBJECTS_POS  (12U)
+/** @brief Number of data objects mask in message header */
 #define PD_MSG_HEADER_NUMBER_OF_DATA_OBJECTS_MASK (0x7000u)
+/** @brief Port power role position in message header */
 #define PD_MSG_HEADER_PORT_POWER_ROLE_POS         (8U)
+/** @brief Port power role mask in message header */
 #define PD_MSG_HEADER_PORT_POWER_ROLE_MASK        (0x0100u)
+/** @brief Spec revision position in message header */
 #define PD_MSG_HEADER_SPEC_REV_POS                (6U)
+/** @brief Port data role position in message header */
 #define PD_MSG_HEADER_PORT_DATA_ROLE_POS          (5U)
+/** @brief Port data role mask in message header */
 #define PD_MSG_HEADER_PORT_DATA_ROLE_MASK         (0x0020u)
+/** @brief Message type position in message header */
 #define PD_MSG_HEADER_MESSAGE_TYPE_POS            (0U)
+/** @brief Message type mask in message header */
 #define PD_MSG_HEADER_MESSAGE_TYPE_MASK           (0x001Fu)
+/** @brief Extended message flag mask */
 #define PD_MSG_HEADER_EXTENDED_MASK               (0x8000u)
+/** @brief Extended message flag position */
 #define PD_MSG_HEADER_EXTENDED_POS                (15U)
 
+/* Extended Message Header Bit Field Definitions */
+
+/** @brief Chunked flag mask in extended header */
 #define PD_MSG_EXT_HEADER_CHUNKED_MASK       (0x8000u)
+/** @brief Chunked flag position in extended header */
 #define PD_MSG_EXT_HEADER_CHUNKED_POS        (15U)
+/** @brief Chunk number mask in extended header */
 #define PD_MSG_EXT_HEADER_CHUNK_NUMBER_MASK  (0x7800u)
+/** @brief Chunk number position in extended header */
 #define PD_MSG_EXT_HEADER_CHUNK_NUMBER_POS   (11U)
+/** @brief Request chunk flag mask in extended header */
 #define PD_MSG_EXT_HEADER_REQUEST_CHUNK_MASK (0x0400u)
+/** @brief Request chunk flag position in extended header */
 #define PD_MSG_EXT_HEADER_REQUEST_CHUNK_POS  (10U)
+/** @brief Data size mask in extended header (0-260 bytes) */
 #define PD_MSG_EXT_HEADER_DATA_SIZE_MASK     (0x01FFu)
+/** @brief Data size position in extended header */
 #define PD_MSG_EXT_HEADER_DATA_SIZE_POS      (0U)
 
+/* Message Type Classification Masks */
+
+/** @brief Control message type mask (no data objects) */
 #define PD_MSG_CONTROL_TYPE_MASK (0x00u)
+/** @brief Data message type mask (1-7 data objects) */
 #define PD_MSG_DATA_TYPE_MASK    (0x80u)
+/** @brief Extended message type mask (chunked data) */
 #define PD_MSG_EXT_TYPE_MASK     (0xC0u)
+/** @brief Message type bits mask */
 #define PD_MSG_TYPE_BITS_MASK    (0xC0u)
+/** @brief Message type value mask */
 #define PD_MSG_TYPE_VALUE_MASK   (0x3Fu)
 
+/**
+ * @brief USB PD message types enumeration
+ * 
+ * Complete list of USB PD 2.0/3.0 message types including:
+ * - Control messages (0x01-0x1F): Protocol control, no data
+ * - Data messages (0x81-0x8F): Carry 1-7 data objects
+ * - Extended messages (0xC1-0xCF): PD 3.0 chunked messages
+ */
 typedef enum _message_type
 {
-    kPD_MsgInvalid              = 0x00u,
-    kPD_MsgGoodCRC              = 0x01u,
-    kPD_MsgGotoMin              = 0x02u,
-    kPD_MsgAccept               = 0x03u,
-    kPD_MsgReject               = 0x04u,
-    kPD_MsgPing                 = 0x05u,
-    kPD_MsgPsRdy                = 0x06u,
-    kPD_MsgGetSourceCap         = 0x07u,
-    kPD_MsgGetSinkCap           = 0x08u,
-    kPD_MsgDrSwap               = 0x09u,
-    kPD_MsgPrSwap               = 0x0Au,
-    kPD_MsgVconnSwap            = 0x0Bu,
-    kPD_MsgWait                 = 0x0Cu,
-    kPD_MsgSoftReset            = 0x0Du,
-    kPD_MsgReserved1            = 0x0Eu,
-    kPD_MsgReserved2            = 0x0Fu,
-    kPD_MsgNotSupported         = 0x10u,
-    kPD_MsgGetSourceCapExtended = 0x11u,
-    kPD_MsgGetStatus            = 0x12u,
-    kPD_MsgFrSwap               = 0x13u,
-    kPD_MsgGetPpsStatus         = 0x14u,
-    kPD_MsgSourceCapabilities   = (PD_MSG_DATA_TYPE_MASK | 0x01u),
-    kPD_MsgRequest              = (PD_MSG_DATA_TYPE_MASK | 0x02u),
-    kPD_MsgBIST                 = (PD_MSG_DATA_TYPE_MASK | 0x03u),
-    kPD_MsgSinkCapabilities     = (PD_MSG_DATA_TYPE_MASK | 0x04u),
-    kPD_MsgBatteryStatus        = (PD_MSG_DATA_TYPE_MASK | 0x05u),
-    kPD_MsgAlert                = (PD_MSG_DATA_TYPE_MASK | 0x06u),
-    kPD_MsgVendorDefined        = (PD_MSG_DATA_TYPE_MASK | 0x0Fu),
+    /* Control Messages */
+    kPD_MsgInvalid              = 0x00u, /**< Invalid/undefined message */
+    kPD_MsgGoodCRC              = 0x01u, /**< GoodCRC acknowledgment */
+    kPD_MsgGotoMin              = 0x02u, /**< Transition to minimum power */
+    kPD_MsgAccept               = 0x03u, /**< Accept request/command */
+    kPD_MsgReject               = 0x04u, /**< Reject request/command */
+    kPD_MsgPing                 = 0x05u, /**< Ping message */
+    kPD_MsgPsRdy                = 0x06u, /**< Power supply ready */
+    kPD_MsgGetSourceCap         = 0x07u, /**< Get source capabilities */
+    kPD_MsgGetSinkCap           = 0x08u, /**< Get sink capabilities */
+    kPD_MsgDrSwap               = 0x09u, /**< Data role swap request */
+    kPD_MsgPrSwap               = 0x0Au, /**< Power role swap request */
+    kPD_MsgVconnSwap            = 0x0Bu, /**< VCONN swap request */
+    kPD_MsgWait                 = 0x0Cu, /**< Wait response */
+    kPD_MsgSoftReset            = 0x0Du, /**< Soft reset */
+    kPD_MsgReserved1            = 0x0Eu, /**< Reserved */
+    kPD_MsgReserved2            = 0x0Fu, /**< Reserved */
+    kPD_MsgNotSupported         = 0x10u, /**< Not supported (PD 3.0) */
+    kPD_MsgGetSourceCapExtended = 0x11u, /**< Get source cap extended */
+    kPD_MsgGetStatus            = 0x12u, /**< Get status */
+    kPD_MsgFrSwap               = 0x13u, /**< Fast role swap */
+    kPD_MsgGetPpsStatus         = 0x14u, /**< Get PPS status */
+    
+    /* Data Messages */
+    kPD_MsgSourceCapabilities   = (PD_MSG_DATA_TYPE_MASK | 0x01u), /**< Source capabilities */
+    kPD_MsgRequest              = (PD_MSG_DATA_TYPE_MASK | 0x02u), /**< Power request */
+    kPD_MsgBIST                 = (PD_MSG_DATA_TYPE_MASK | 0x03u), /**< BIST mode */
+    kPD_MsgSinkCapabilities     = (PD_MSG_DATA_TYPE_MASK | 0x04u), /**< Sink capabilities */
+    kPD_MsgBatteryStatus        = (PD_MSG_DATA_TYPE_MASK | 0x05u), /**< Battery status */
+    kPD_MsgAlert                = (PD_MSG_DATA_TYPE_MASK | 0x06u), /**< Alert message */
+    kPD_MsgVendorDefined        = (PD_MSG_DATA_TYPE_MASK | 0x0Fu), /**< Vendor defined message */
 
-    kPD_MsgSourceCapExtended      = (PD_MSG_EXT_TYPE_MASK | 0x01u),
-    kPD_MsgStatus                 = (PD_MSG_EXT_TYPE_MASK | 0x02u),
-    kPD_MsgGetBatteryCap          = (PD_MSG_EXT_TYPE_MASK | 0x03u),
-    kPD_MsgGetBatteryStatus       = (PD_MSG_EXT_TYPE_MASK | 0x04u),
-    kPD_MsgBatteryCapabilities    = (PD_MSG_EXT_TYPE_MASK | 0x05u),
-    kPD_MsgGetManufacturerInfo    = (PD_MSG_EXT_TYPE_MASK | 0x06u),
-    kPD_MsgManufacturerInfo       = (PD_MSG_EXT_TYPE_MASK | 0x07u),
-    kPD_MsgSecurityRequest        = (PD_MSG_EXT_TYPE_MASK | 0x08u),
-    kPD_MsgSecurityResponse       = (PD_MSG_EXT_TYPE_MASK | 0x09u),
-    kPD_MsgFirmwareUpdateRequest  = (PD_MSG_EXT_TYPE_MASK | 0x0Au),
-    kPD_MsgFirmwareUpdaetResponse = (PD_MSG_EXT_TYPE_MASK | 0x0Bu),
-    kPD_MsgPpsStatus              = (PD_MSG_EXT_TYPE_MASK | 0x0Cu),
+    /* Extended Messages (PD 3.0) */
+    kPD_MsgSourceCapExtended      = (PD_MSG_EXT_TYPE_MASK | 0x01u), /**< Source cap extended */
+    kPD_MsgStatus                 = (PD_MSG_EXT_TYPE_MASK | 0x02u), /**< Status extended */
+    kPD_MsgGetBatteryCap          = (PD_MSG_EXT_TYPE_MASK | 0x03u), /**< Get battery cap */
+    kPD_MsgGetBatteryStatus       = (PD_MSG_EXT_TYPE_MASK | 0x04u), /**< Get battery status */
+    kPD_MsgBatteryCapabilities    = (PD_MSG_EXT_TYPE_MASK | 0x05u), /**< Battery capabilities */
+    kPD_MsgGetManufacturerInfo    = (PD_MSG_EXT_TYPE_MASK | 0x06u), /**< Get manufacturer info */
+    kPD_MsgManufacturerInfo       = (PD_MSG_EXT_TYPE_MASK | 0x07u), /**< Manufacturer info */
+    kPD_MsgSecurityRequest        = (PD_MSG_EXT_TYPE_MASK | 0x08u), /**< Security request */
+    kPD_MsgSecurityResponse       = (PD_MSG_EXT_TYPE_MASK | 0x09u), /**< Security response */
+    kPD_MsgFirmwareUpdateRequest  = (PD_MSG_EXT_TYPE_MASK | 0x0Au), /**< Firmware update request */
+    kPD_MsgFirmwareUpdaetResponse = (PD_MSG_EXT_TYPE_MASK | 0x0Bu), /**< Firmware update response */
+    kPD_MsgPpsStatus              = (PD_MSG_EXT_TYPE_MASK | 0x0Cu), /**< PPS status */
 } message_type_t;
 
+/**
+ * @brief Extended message types enumeration
+ * 
+ * Simplified enumeration for PD 3.0 extended message types.
+ */
 typedef enum _extended_message_type
 {
-    kPD_ExtMsgSourceCapExtended = 1u,
-    kPD_ExtMsgStatus,
-    kPD_ExtMsgGetBatteryCap,
-    kPD_ExtMsgGetBatteryStatus,
-    kPD_ExtMsgBatteryCapabilities,
-    kPD_ExtMsgGetManufacturerInfo,
-    kPD_ExtmsgManufacturerInfo,
-    kPD_ExtMsgSecurityRequest,
-    kPD_ExtMsgSecurityResponse,
-    kPD_ExtMsgFirmwareUpdateRequest,
-    kPD_ExtMsgFirmwareUpdaetResponse,
+    kPD_ExtMsgSourceCapExtended = 1u, /**< Source capabilities extended */
+    kPD_ExtMsgStatus,                 /**< Status extended */
+    kPD_ExtMsgGetBatteryCap,          /**< Get battery capabilities */
+    kPD_ExtMsgGetBatteryStatus,       /**< Get battery status */
+    kPD_ExtMsgBatteryCapabilities,    /**< Battery capabilities */
+    kPD_ExtMsgGetManufacturerInfo,    /**< Get manufacturer info */
+    kPD_ExtmsgManufacturerInfo,       /**< Manufacturer info */
+    kPD_ExtMsgSecurityRequest,        /**< Security request */
+    kPD_ExtMsgSecurityResponse,       /**< Security response */
+    kPD_ExtMsgFirmwareUpdateRequest,  /**< Firmware update request */
+    kPD_ExtMsgFirmwareUpdaetResponse, /**< Firmware update response */
 } extended_message_type_t;
 
+/**
+ * @brief Policy Engine state machine states
+ * 
+ * Enumeration of all Policy Engine states per USB PD specification.
+ * Includes source/sink states, power/data role swap states, VCONN swap,
+ * alternate mode, structured/unstructured VDM, BIST, and extended message states.
+ */
 typedef enum _pd_psm_state
 {
     PSM_UNKNOWN                      = 0, /* Internal state */
@@ -328,6 +412,12 @@ typedef enum _pd_psm_state
     PE_PSM_STATE_NO_CHANGE,
 } pd_psm_state_t;
 
+/**
+ * @brief Type-C state machine states
+ * 
+ * Enumeration of all Type-C connection states including Unattached, Attached,
+ * Try.SRC/Try.SNK, audio/debug accessories, dead battery, and toggle modes.
+ */
 typedef enum
 {
     TYPEC_DISABLED        = 0,
@@ -360,6 +450,13 @@ typedef enum
     TYPEC_INVALID_STATE = 0xFFU,
 } TypeCState_t;
 
+/**
+ * @brief Chunking layer state machine states
+ * 
+ * Enumeration of states for PD 3.0 extended message chunking protocol.
+ * Includes receive chunk handler (RCH) and transmit chunk handler (TCH) states
+ * for fragmenting/reassembling extended messages up to 260 bytes.
+ */
 typedef enum
 {
     RCH_Wait_For_Message_From_Protocol_Layer,

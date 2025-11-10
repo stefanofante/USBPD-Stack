@@ -1,3 +1,14 @@
+/**
+ * @file fsl_adapter_gpio_esp32.c
+ * @brief GPIO HAL adapter for ESP32-S3 using ESP-IDF
+ * 
+ * @details Implements platform-independent GPIO abstraction on ESP32-S3.
+ *          Handles ISR service installation and interrupt callbacks.
+ * 
+ * @author Stefano Fante (STLINE SRL)
+ * @date 2025
+ */
+
 #include "support/fsl_adapter_gpio.h"
 
 #if defined(PD_CONFIG_TARGET_ESP32S3) && (PD_CONFIG_TARGET_ESP32S3)
@@ -7,19 +18,29 @@
 #include "driver/gpio.h"
 #include "esp_err.h"
 
+/**
+ * @brief Internal GPIO handle structure for ESP32-S3
+ */
 typedef struct _hal_gpio_handle
 {
-    gpio_num_t pin;
-    hal_gpio_direction_t direction;
-    hal_gpio_interrupt_trigger_t trigger;
-    hal_gpio_callback_t callback;
-    void *callbackParam;
-    uint32_t isrFlags;
-    bool isrAttached;
+    gpio_num_t pin;                          /**< ESP32 GPIO pin number */
+    hal_gpio_direction_t direction;          /**< Input or output direction */
+    hal_gpio_interrupt_trigger_t trigger;    /**< Interrupt trigger type */
+    hal_gpio_callback_t callback;            /**< User callback for interrupts */
+    void *callbackParam;                     /**< User parameter for callback */
+    uint32_t isrFlags;                       /**< ESP-IDF ISR allocation flags */
+    bool isrAttached;                        /**< True if ISR handler is attached */
 } hal_gpio_handle_obj_t;
 
+/** @brief Global flag tracking ISR service installation */
 static bool s_isrServiceInstalled = false;
 
+/**
+ * @brief Map HAL interrupt trigger to ESP-IDF gpio_int_type_t
+ * 
+ * @param[in] trigger HAL interrupt trigger enumeration
+ * @return ESP-IDF GPIO interrupt type
+ */
 static gpio_int_type_t PD_GpioMapTrigger(hal_gpio_interrupt_trigger_t trigger)
 {
     switch (trigger)
@@ -40,6 +61,14 @@ static gpio_int_type_t PD_GpioMapTrigger(hal_gpio_interrupt_trigger_t trigger)
     }
 }
 
+/**
+ * @brief Ensure GPIO ISR service is installed
+ * 
+ * @param[in] intrFlags ESP-IDF ISR allocation flags
+ * 
+ * @details Calls gpio_install_isr_service() once per process. Ignores
+ *          ESP_ERR_INVALID_STATE if already installed.
+ */
 static void PD_GpioEnsureIsrService(uint32_t intrFlags)
 {
     if (!s_isrServiceInstalled)
@@ -52,6 +81,11 @@ static void PD_GpioEnsureIsrService(uint32_t intrFlags)
     }
 }
 
+/**
+ * @brief ISR thunk to dispatch GPIO interrupts to user callbacks
+ * 
+ * @param[in] arg Pointer to hal_gpio_handle_obj_t
+ */
 static void PD_GpioIsrThunk(void *arg)
 {
     hal_gpio_handle_obj_t *handle = (hal_gpio_handle_obj_t *)arg;
@@ -61,6 +95,12 @@ static void PD_GpioIsrThunk(void *arg)
     }
 }
 
+/**
+ * @brief Apply pull-up/pull-down configuration to a GPIO pin
+ * 
+ * @param[in] pin ESP32 GPIO pin number
+ * @param[in] mode HAL pull mode enumeration
+ */
 static void PD_GpioApplyPullMode(gpio_num_t pin, hal_gpio_pull_mode_t mode)
 {
     switch (mode)
@@ -81,6 +121,16 @@ static void PD_GpioApplyPullMode(gpio_num_t pin, hal_gpio_pull_mode_t mode)
     }
 }
 
+/**
+ * @brief Initialize a GPIO pin
+ * 
+ * @param[in,out] handle Pointer to GPIO handle (will be allocated)
+ * @param[in] config Pin configuration
+ * 
+ * @return kStatus_HAL_GpioSuccess on success, kStatus_HAL_GpioError otherwise
+ * 
+ * @details Calls ESP-IDF gpio_config() and sets initial output level.
+ */
 hal_gpio_status_t HAL_GpioInit(hal_gpio_handle_t *handle, const hal_gpio_pin_config_t *config)
 {
     if ((handle == NULL) || (config == NULL) || (*handle != NULL))
@@ -124,6 +174,14 @@ hal_gpio_status_t HAL_GpioInit(hal_gpio_handle_t *handle, const hal_gpio_pin_con
     return kStatus_HAL_GpioSuccess;
 }
 
+/**
+ * @brief Deinitialize a GPIO pin
+ * 
+ * @param[in,out] handle Pointer to GPIO handle (will be freed)
+ * @return kStatus_HAL_GpioSuccess on success, kStatus_HAL_GpioError otherwise
+ * 
+ * @details Removes ISR handler and calls gpio_reset_pin().
+ */
 hal_gpio_status_t HAL_GpioDeinit(hal_gpio_handle_t *handle)
 {
     if ((handle == NULL) || (*handle == NULL))
@@ -145,6 +203,17 @@ hal_gpio_status_t HAL_GpioDeinit(hal_gpio_handle_t *handle)
     return kStatus_HAL_GpioSuccess;
 }
 
+/**
+ * @brief Install an interrupt callback for a GPIO pin
+ * 
+ * @param[in] handle Pointer to GPIO handle
+ * @param[in] callback Callback function
+ * @param[in] param User parameter
+ * 
+ * @return kStatus_HAL_GpioSuccess on success, kStatus_HAL_GpioError otherwise
+ * 
+ * @details Ensures ISR service is installed and adds the ISR handler.
+ */
 hal_gpio_status_t HAL_GpioInstallCallback(hal_gpio_handle_t *handle, hal_gpio_callback_t callback, void *param)
 {
     if ((handle == NULL) || (*handle == NULL))
@@ -174,6 +243,14 @@ hal_gpio_status_t HAL_GpioInstallCallback(hal_gpio_handle_t *handle, hal_gpio_ca
     return kStatus_HAL_GpioSuccess;
 }
 
+/**
+ * @brief Set GPIO interrupt trigger mode
+ * 
+ * @param[in] handle Pointer to GPIO handle
+ * @param[in] triggerMode Trigger mode (rising, falling, both, level)
+ * 
+ * @return kStatus_HAL_GpioSuccess on success, kStatus_HAL_GpioError otherwise
+ */
 hal_gpio_status_t HAL_GpioSetTriggerMode(hal_gpio_handle_t *handle, hal_gpio_interrupt_trigger_t triggerMode)
 {
     if ((handle == NULL) || (*handle == NULL))
@@ -198,6 +275,16 @@ hal_gpio_status_t HAL_GpioSetTriggerMode(hal_gpio_handle_t *handle, hal_gpio_int
     return kStatus_HAL_GpioSuccess;
 }
 
+/**
+ * @brief Configure wake-up functionality on ESP32-S3
+ * 
+ * @param[in] handle Pointer to GPIO handle
+ * @param[in] enable Enable (1) or disable (0) wake-up
+ * 
+ * @return kStatus_HAL_GpioSuccess on success, kStatus_HAL_GpioError otherwise
+ * 
+ * @details Calls gpio_wakeup_enable() or gpio_wakeup_disable().
+ */
 hal_gpio_status_t HAL_GpioWakeUpSetting(hal_gpio_handle_t *handle, uint8_t enable)
 {
     if ((handle == NULL) || (*handle == NULL))
@@ -218,6 +305,14 @@ hal_gpio_status_t HAL_GpioWakeUpSetting(hal_gpio_handle_t *handle, uint8_t enabl
     return kStatus_HAL_GpioSuccess;
 }
 
+/**
+ * @brief Read the current logic level of a GPIO input
+ * 
+ * @param[in] handle Pointer to GPIO handle
+ * @param[out] value Pointer to receive the value (0 or 1)
+ * 
+ * @return kStatus_HAL_GpioSuccess on success, kStatus_HAL_GpioError otherwise
+ */
 hal_gpio_status_t HAL_GpioGetInput(hal_gpio_handle_t *handle, uint8_t *value)
 {
     if ((handle == NULL) || (*handle == NULL) || (value == NULL))

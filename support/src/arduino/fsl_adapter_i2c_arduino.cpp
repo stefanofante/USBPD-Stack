@@ -1,3 +1,14 @@
+/**
+ * @file fsl_adapter_i2c_arduino.cpp
+ * @brief I2C master HAL adapter for Arduino using TwoWire
+ * 
+ * @details Implements platform-independent I2C abstraction using Arduino Wire
+ *          library. Includes I2C bus release logic.
+ * 
+ * @author Stefano Fante (STLINE SRL)
+ * @date 2025
+ */
+
 #include "support/fsl_adapter_i2c.h"
 
 #if defined(PD_CONFIG_TARGET_ARDUINO) && (PD_CONFIG_TARGET_ARDUINO)
@@ -11,23 +22,35 @@
 
 namespace
 {
+/**
+ * @brief I2C instance configuration
+ */
 struct I2cInstanceConfig
 {
-    bool configured;
-    TwoWire *wire;
-    int sdaPin;
-    int sclPin;
-    uint32_t busSpeed;
-    bool internalPullup;
+    bool configured;       /**< True if configured via PD_I2cConfigureArduino() */
+    TwoWire *wire;         /**< Pointer to Arduino TwoWire object */
+    int sdaPin;            /**< SDA pin number */
+    int sclPin;            /**< SCL pin number */
+    uint32_t busSpeed;     /**< I2C bus frequency in Hz */
+    bool internalPullup;   /**< Enable internal pull-up resistors */
 };
 
+/**
+ * @brief Internal I2C master handle
+ */
 struct _hal_i2c_master_handle
 {
-    uint8_t instance;
+    uint8_t instance;  /**< I2C instance number */
 };
 
+/** @brief Global I2C configuration storage */
 I2cInstanceConfig s_i2cConfig[USB_PD_I2C_INSTANCE_COUNT];
 
+/**
+ * @brief Release a stuck I2C bus by toggling SCL
+ * 
+ * @param[in] instance I2C instance number
+ */
 void ReleaseBusOnInstance(uint8_t instance)
 {
     if (instance >= USB_PD_I2C_INSTANCE_COUNT)
@@ -62,21 +85,34 @@ void ReleaseBusOnInstance(uint8_t instance)
     pinMode(cfg.sclPin, INPUT_PULLUP);
 }
 
+/**
+ * @brief Release bus for I2C instance 0
+ */
 void ReleaseBus0(void)
 {
     ReleaseBusOnInstance(0);
 }
 
+/**
+ * @brief Release bus for I2C instance 1
+ */
 void ReleaseBus1(void)
 {
     ReleaseBusOnInstance(1);
 }
 
+/** @brief Array of bus release function pointers */
 const PD_I2cReleaseBus s_releaseHandlers[USB_PD_I2C_INSTANCE_COUNT] = {
     ReleaseBus0,
     ReleaseBus1,
 };
 
+/**
+ * @brief Get TwoWire pointer for a given instance
+ * 
+ * @param[in] instance I2C instance number
+ * @return Pointer to TwoWire or nullptr if not configured
+ */
 TwoWire *GetWire(uint8_t instance)
 {
     if (instance >= USB_PD_I2C_INSTANCE_COUNT)
@@ -94,6 +130,14 @@ TwoWire *GetWire(uint8_t instance)
 
 extern "C" {
 
+/**
+ * @brief Configure I2C hardware for Arduino
+ * 
+ * @param[in] instance I2C instance number
+ * @param[in] config Hardware configuration (TwoWire pointer, pins, speed)
+ * @param[out] releaseBusOut Pointer to receive bus release function
+ * @return kStatus_PD_Success on success
+ */
 pd_status_t PD_I2cConfigureArduino(uint8_t instance,
                                    const pd_i2c_arduino_config_t *config,
                                    PD_I2cReleaseBus *releaseBusOut)
@@ -118,6 +162,15 @@ pd_status_t PD_I2cConfigureArduino(uint8_t instance,
     return kStatus_PD_Success;
 }
 
+/**
+ * @brief Initialize an I2C master handle
+ * 
+ * @param[out] handle Pointer to handle (will be allocated)
+ * @param[in] config Configuration (instance number)
+ * @return kStatus_HAL_I2cSuccess on success
+ * 
+ * @details Calls TwoWire::begin() and setClock().
+ */
 hal_i2c_status_t HAL_I2cMasterInit(hal_i2c_master_handle_t *handle, const hal_i2c_master_config_t *config)
 {
     if ((handle == NULL) || (config == NULL))
@@ -150,6 +203,12 @@ hal_i2c_status_t HAL_I2cMasterInit(hal_i2c_master_handle_t *handle, const hal_i2
     return kStatus_HAL_I2cSuccess;
 }
 
+/**
+ * @brief Deinitialize an I2C master handle
+ * 
+ * @param[in,out] handle Pointer to handle (will be freed)
+ * @return kStatus_HAL_I2cSuccess on success
+ */
 hal_i2c_status_t HAL_I2cMasterDeinit(hal_i2c_master_handle_t *handle)
 {
     if ((handle == NULL) || (*handle == NULL))
@@ -162,6 +221,19 @@ hal_i2c_status_t HAL_I2cMasterDeinit(hal_i2c_master_handle_t *handle)
     return kStatus_HAL_I2cSuccess;
 }
 
+/**
+ * @brief Perform an I2C write with optional sub-address
+ * 
+ * @param[in] wire TwoWire reference
+ * @param[in] slaveAddress 7-bit slave address
+ * @param[in] subaddress Register address (big-endian)
+ * @param[in] subaddressSize Number of sub-address bytes (0, 1, or 2)
+ * @param[in] data Data to write
+ * @param[in] length Number of bytes to write
+ * @return kStatus_HAL_I2cSuccess on success
+ * 
+ * @details Calls TwoWire::beginTransmission(), write(), and endTransmission().
+ */
 static hal_i2c_status_t I2cWrite(TwoWire &wire,
                                  uint8_t slaveAddress,
                                  uint32_t subaddress,
@@ -183,6 +255,19 @@ static hal_i2c_status_t I2cWrite(TwoWire &wire,
     return (result == 0U) ? kStatus_HAL_I2cSuccess : kStatus_HAL_I2cError;
 }
 
+/**
+ * @brief Perform an I2C read with optional sub-address
+ * 
+ * @param[in] wire TwoWire reference
+ * @param[in] slaveAddress 7-bit slave address
+ * @param[in] subaddress Register address (big-endian)
+ * @param[in] subaddressSize Number of sub-address bytes (0, 1, or 2)
+ * @param[out] data Buffer to receive data
+ * @param[in] length Number of bytes to read
+ * @return kStatus_HAL_I2cSuccess on success
+ * 
+ * @details Writes sub-address with repeated start, then calls requestFrom().
+ */
 static hal_i2c_status_t I2cRead(TwoWire &wire,
                                 uint8_t slaveAddress,
                                 uint32_t subaddress,
@@ -225,6 +310,15 @@ static hal_i2c_status_t I2cRead(TwoWire &wire,
     return kStatus_HAL_I2cSuccess;
 }
 
+/**
+ * @brief Perform a blocking I2C transfer
+ * 
+ * @param[in] handle I2C master handle
+ * @param[in,out] xfer Transfer descriptor
+ * @return kStatus_HAL_I2cSuccess on success
+ * 
+ * @details Calls I2cRead() or I2cWrite() based on xfer->direction.
+ */
 hal_i2c_status_t HAL_I2cMasterTransferBlocking(hal_i2c_master_handle_t *handle, hal_i2c_master_transfer_t *xfer)
 {
     if ((handle == NULL) || (*handle == NULL) || (xfer == NULL))

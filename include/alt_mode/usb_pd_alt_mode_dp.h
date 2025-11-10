@@ -6,6 +6,19 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file usb_pd_alt_mode_dp.h
+ * @brief DisplayPort Alternate Mode interface
+ * 
+ * @details Implements VESA DisplayPort Alternate Mode specification over USB Type-C.
+ *          Supports DFP/UFP roles, HPD signaling, multi-function pin assignments,
+ *          status/configure VDMs, and USB/DP mode switching. Handles video link
+ *          configuration with DP controller integration callbacks.
+ * 
+ * @copyright Copyright 2017 NXP
+ * @license BSD-3-Clause
+ */
+
 #ifndef __USB_PD_ALT_MODE_DP_H__
 #define __USB_PD_ALT_MODE_DP_H__
 

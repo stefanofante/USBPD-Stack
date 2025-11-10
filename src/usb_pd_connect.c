@@ -1,8 +1,33 @@
-/*
- * Copyright 2015 - 2017 NXP
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+/**
+ * @file usb_pd_connect.c
+ * @brief USB Type-C Connection State Machine Implementation
+ * 
+ * @details Implements the Type-C connection detection and role negotiation state machine
+ *          per USB Type-C specification. Handles:
+ *          - CC line monitoring and debouncing
+ *          - Source/Sink/DRP connection detection
+ *          - Try.SRC and Try.SNK mechanisms
+ *          - Audio/Debug accessory support
+ *          - VCONN sourcing control
+ *          - Ra detection for cable presence
+ *          - DRP toggle timing (35% source duty cycle)
+ * 
+ *          Key timing parameters (Type-C spec compliant):
+ *          - T_PD_DEBOUNCE: 12ms (10-20ms range) - PD message debounce
+ *          - T_CC_DEBOUNCE: 105ms (100-200ms range) - CC state debounce
+ *          - T_DRP: 75ms (50-100ms range) - DRP toggle period
+ *          - T_DRP_TRY: 100ms (75-150ms range) - Try.SRC/SNK duration
+ *          - T_TRY_TIMEOUT: 600ms (550-1100ms range) - Try.SRC timeout
+ * 
+ *          State machine hierarchy:
+ *          - Source states: Unattached.SRC → AttachWait.SRC → Attached.SRC
+ *          - Sink states: Unattached.SNK → AttachWait.SNK → Attached.SNK
+ *          - DRP states: Toggle between SRC/SNK with configurable duty cycle
+ *          - Try states: Try.SRC/Try.SNK for optimized role resolution
+ *          - Accessory states: Audio/Debug accessory detection
+ * 
+ * @copyright Copyright 2015 - 2017 NXP. All rights reserved.
+ * @license SPDX-License-Identifier: BSD-3-Clause
  */
 
 #include "usb_pd_config.h"
@@ -1749,6 +1774,15 @@ static uint8_t PD_ConnectDeadBatteryCheck(pd_instance_t *pdInstance)
     return 0;
 }
 
+/**
+ * @brief Set VBUS power state progress
+ * 
+ * Updates VBUS power transition state and disables auto-discharge, VBUS alarm,
+ * and sink disconnect detection during power transitions (PR_Swap, FR_Swap, Hard Reset).
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] state VBUS power progress state
+ */
 void PD_ConnectSetPowerProgress(pd_instance_t *pdInstance, pd_vbus_power_progress_t state)
 {
     if ((state != kVbusPower_Invalid) && (pdInstance->inProgress != state))
@@ -1777,6 +1811,18 @@ void PD_ConnectSetPowerProgress(pd_instance_t *pdInstance, pd_vbus_power_progres
     }
 }
 
+/**
+ * @brief Get initial Type-C role state based on configuration
+ * 
+ * Determines starting Type-C state machine state based on port configuration:
+ * - Source-only: TYPEC_UNATTACHED_SRC
+ * - Sink-only: TYPEC_UNATTACHED_SNK or TYPEC_DEAD_BATTERY_SNK
+ * - DRP: Toggle state based on Try.SRC/Try.SNK config
+ * - Accessory: TYPEC_UNATTACHED_ACCESSORY
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return Initial Type-C state
+ */
 TypeCState_t PD_ConnectGetInitRoleState(pd_instance_t *pdInstance)
 {
     TypeCState_t newState = TYPEC_DISABLED;
@@ -1823,6 +1869,18 @@ TypeCState_t PD_ConnectGetInitRoleState(pd_instance_t *pdInstance)
     return newState;
 }
 
+/**
+ * @brief Initialize Type-C role state machine
+ * 
+ * Initializes or reinitializes the Type-C connection state machine.
+ * If errorRecovery is set, enters ErrorRecovery state per Type-C spec
+ * (removes CC terminations for T_ERROR_RECOVERY then transitions to unattached).
+ * 
+ * Handles VBUS discharge on startup if needed (non-dead-battery states with VBUS present).
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] errorRecovery 1 to perform error recovery sequence, 0 for normal init
+ */
 void PD_ConnectInitRole(pd_instance_t *pdInstance, uint8_t errorRecovery)
 {
     TypeCState_t newState;
@@ -1893,6 +1951,15 @@ void PD_ConnectInitRole(pd_instance_t *pdInstance, uint8_t errorRecovery)
     }
 }
 
+/**
+ * @brief Update Type-C state after power role swap
+ * 
+ * Transitions Type-C state machine between ATTACHED_SRC and ATTACHED_SNK
+ * following successful PR_Swap completion.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] powerRole New power role after swap
+ */
 void PD_ConnectSetPRSwapRole(pd_instance_t *pdInstance, pd_power_role_t powerRole)
 {
     TypeCState_t newState;
@@ -1917,6 +1984,15 @@ void PD_ConnectSetPRSwapRole(pd_instance_t *pdInstance, pd_power_role_t powerRol
     }
 }
 
+/**
+ * @brief Handle alternate mode entry failure
+ * 
+ * Transitions from POWERED_ACCESSORY state to UNSUPPORTED_ACCESSORY or
+ * UNATTACHED_SNK when alternate mode entry fails.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] pdConnected 1 if PD communication established, 0 otherwise
+ */
 void PD_ConnectAltModeEnterFail(pd_instance_t *pdInstance, uint8_t pdConnected)
 {
     if (pdConnected != 0U)
@@ -1937,6 +2013,17 @@ void PD_ConnectAltModeEnterFail(pd_instance_t *pdInstance, uint8_t pdConnected)
     }
 }
 
+/**
+ * @brief Get simplified connection state
+ * 
+ * Maps detailed Type-C state machine state to simplified connection state:
+ * - kConnectState_Connected: Attached states (SRC/SNK/Accessory)
+ * - kConnectState_Disconnected: Unattached/Disabled states
+ * - kConnectState_NotStable: Transitional states (AttachWait, Try, Toggle)
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return Simplified connection state
+ */
 pd_connect_state_t PD_ConnectState(pd_instance_t *pdInstance)
 {
     pd_connect_state_t reVal;
@@ -1972,12 +2059,27 @@ pd_connect_state_t PD_ConnectState(pd_instance_t *pdInstance)
     return reVal;
 }
 
+/**
+ * @brief Execute Type-C state machine and return connection state
+ * 
+ * Runs one iteration of Type-C connection state machine and returns
+ * the resulting simplified connection state.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return Connection state after state machine execution
+ */
 pd_connect_state_t PD_ConnectCheck(pd_instance_t *pdInstance)
 {
     PD_ConnectStateMachine(pdInstance);
     return PD_ConnectState(pdInstance);
 }
 
+/**
+ * @brief Get current Type-C state machine state
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return Current Type-C state (TypeCState_t enum value)
+ */
 TypeCState_t PD_ConnectGetStateMachine(pd_instance_t *pdInstance)
 {
     return pdInstance->curConnectState;

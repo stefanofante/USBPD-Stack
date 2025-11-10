@@ -5,6 +5,19 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file usb_pd_i2c.c
+ * @brief USB PD I2C communication implementation
+ * 
+ * @details Implements I2C wrapper for PTN5110 TCPC communication.
+ *          Provides blocking read/write operations with automatic retry,
+ *          bus recovery on error, and multi-instance support with mutex protection.
+ *          Wraps HAL_I2cMaster API for platform independence.
+ * 
+ * @copyright Copyright 2019 NXP
+ * @license BSD-3-Clause
+ */
+
 #include "support/fsl_common.h"
 #include "support/fsl_adapter_i2c.h"
 #include "usb_pd.h"

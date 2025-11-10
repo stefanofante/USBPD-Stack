@@ -1,8 +1,35 @@
-/*
- * Copyright 2015 - 2017 NXP
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+/**
+ * @file usb_pd_msg.c
+ * @brief USB PD Message Handling Implementation
+ * 
+ * @details Implements USB PD message transmission, reception, and protocol handling.
+ *          Manages message ID sequencing, GoodCRC handling, and message buffering.
+ * 
+ *          Key responsibilities:
+ *          - Message ID management (0-7 counter per SOP type)
+ *          - Message transmission with retry handling
+ *          - Message reception with duplicate filtering
+ *          - Extended message chunking (PD 3.0)
+ *          - Structured VDM transmission
+ *          - Hard reset transmission/reception
+ * 
+ *          Message ID protocol:
+ *          - Separate counters for SOP/SOP'/SOP''
+ *          - Increment on successful transmission
+ *          - Reset on hard reset or soft reset
+ *          - Duplicate detection using received message ID cache
+ * 
+ *          Message flow:
+ *          TX: PD_MsgSend() → PHY transmission → PD_MsgSendDone() callback
+ *          RX: PHY reception → PD_MsgReceived() → Policy engine processing
+ * 
+ *          Header masking for cable communication:
+ *          - SOP: All bits valid (0xFFFFFFFF)
+ *          - SOP' cable: Mask certain bits (0xFFDFFFFF)
+ *          - SOP' non-cable: Different mask (0xFEDFFFFF)
+ * 
+ * @copyright Copyright 2015 - 2017 NXP. All rights reserved.
+ * @license SPDX-License-Identifier: BSD-3-Clause
  */
 
 #include "usb_pd_config.h"
@@ -56,6 +83,14 @@ static inline void PD_MsgIncrMsgId(pd_instance_t *pdInstance, start_of_packet_t 
     pdInstance->msgId[sop] = (uint8_t)(pdInstance->msgId[sop] + 1U) & (uint8_t)0x07U;
 }
 
+/**
+ * @brief Reset message handling subsystem
+ * 
+ * Resets all message IDs, PHY message function, and message state flags.
+ * Called during initialization and hard reset recovery.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgReset(pd_instance_t *pdInstance)
 {
     PD_MsgResetAllMsgId(pdInstance);
@@ -67,6 +102,15 @@ void PD_MsgReset(pd_instance_t *pdInstance)
     pdInstance->receivedData      = NULL;
 }
 
+/**
+ * @brief Notify message send completion
+ * 
+ * Called by PHY layer when message transmission completes (success or failure).
+ * Updates message ID on successful transmission, sets event flag for policy engine.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] result Send result (kStatus_PD_Success or error)
+ */
 void PD_MsgSendDone(pd_instance_t *pdInstance, pd_status_t result)
 {
     if (pdInstance->sendingState == 1U)
@@ -106,20 +150,21 @@ static void PD_MsgCopy(void *dst, void *src, uint32_t size)
     }
 }
 
-/*!
- * @brief Send control, data and extended message.
- *
- * This function is used to send control message, data message or extended message.
- *
- * @param pdInstance      The pd handle. It equals the value returned from PD_InstanceInit.
- * @param sop             The sending sop. Please refer to the enumeration start_of_packet_t.
- * @param msgType         Message type. Please refer to the enumeration message_type_t.
- * @param dataLength      The length of buffer. It is from MsgHeaderLow to ByteN.
- * @param dataBuffer      The sending buffer. The pointer of dataBuffer points to Byte0.
- *                        The format of buffer. 0-NULL, 1-I2C_WRITE_BYTE_COUNT, 2-MsgHeaderLowByte,
- *                        3-MsgHeaderHighByte, 4-Byte0, 5-Byte1, ..., N-ByteN.
- *
- * @return kStatus_PD_Error or kStatus_PD_Success.
+/**
+ * @brief Send PD message (control, data, or extended)
+ * 
+ * Constructs and sends USB PD message with proper header formatting:
+ * - Sets message type, data role, power role, spec revision
+ * - Assigns message ID and increments on success
+ * - Handles SOP/SOP'/SOP'' header masking
+ * - Copies data objects to send buffer
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] sop Start of packet type (SOP/SOP'/SOP'')
+ * @param[in] msgType Message type (control/data/extended)
+ * @param[in] dataLength Number of data objects (0 for control messages)
+ * @param[in] dataBuffer Pointer to data objects (can be NULL for control)
+ * @return kStatus_PD_Success on success, error code otherwise
  */
 pd_status_t PD_MsgSend(
     pd_instance_t *pdInstance, start_of_packet_t sop, message_type_t msgType, uint32_t dataLength, uint8_t *dataBuffer)
@@ -276,6 +321,14 @@ pd_status_t PD_MsgSendStructuredVDM(pd_instance_t *pdInstance,
 }
 #endif
 
+/**
+ * @brief Handle hard reset reception
+ * 
+ * Called by PHY when hard reset received on CC line. Resets all message IDs
+ * and posts hard reset event to policy engine.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgReceivedHardReset(pd_instance_t *pdInstance)
 {
     pdInstance->hardResetReceived = 1;
@@ -283,15 +336,14 @@ void PD_MsgReceivedHardReset(pd_instance_t *pdInstance)
     PD_StackSetEvent(pdInstance, PD_TASK_EVENT_RECEIVED_HARD_RESET);
 }
 
-/*!
- * @brief Transmit hard reset or cable reset.
- *
- * This function should be called when policy engine initiates hard reset or cable reset.
- *
- * @param pdInstance            The pd handle. It equals the value returned from PD_InstanceInit.
- * @param hardResetOrCableReset 0 - hard reset, 1 - cable reset.
- *
- * @return None.
+/**
+ * @brief Transmit hard reset or cable reset
+ * 
+ * Initiates hard reset (clears message state) or cable reset (SOP' targeted).
+ * Resets all message IDs and triggers PHY to send reset signaling.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] hardResetOrCableReset 0 for hard reset, 1 for cable reset
  */
 void PD_MsgSendHardOrCableReset(pd_instance_t *pdInstance, uint8_t hardResetOrCableReset)
 {
@@ -326,6 +378,18 @@ void PD_MsgSendHardOrCableReset(pd_instance_t *pdInstance, uint8_t hardResetOrCa
     }
 }
 
+/**
+ * @brief Process received message from PHY
+ * 
+ * Handles message reception from PHY layer:
+ * - Validates message header and SOP type
+ * - Checks message ID for duplicates
+ * - Caches received data for policy engine
+ * - Posts message received event
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] rxResult RX result structure from PHY
+ */
 void PD_MsgReceived(pd_instance_t *pdInstance, pd_phy_rx_result_t *rxResult)
 {
     pd_msg_header_t msgHeader;
@@ -372,6 +436,14 @@ void PD_MsgReceived(pd_instance_t *pdInstance, pd_phy_rx_result_t *rxResult)
     }
 }
 
+/**
+ * @brief Stop message reception
+ * 
+ * Disables message reception in PHY. Used during disconnection or
+ * when transitioning to states that don't accept messages.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgStopReceive(pd_instance_t *pdInstance)
 {
     OSA_SR_ALLOC();
@@ -389,6 +461,14 @@ void PD_MsgStopReceive(pd_instance_t *pdInstance)
     }
 }
 
+/**
+ * @brief Start message reception
+ * 
+ * Enables message reception in PHY. Called when entering states that
+ * should monitor for incoming PD messages.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgStartReceive(pd_instance_t *pdInstance)
 {
     OSA_SR_ALLOC();
@@ -399,6 +479,14 @@ void PD_MsgStartReceive(pd_instance_t *pdInstance)
     PD_MsgReceive(pdInstance);
 }
 
+/**
+ * @brief Check for and initiate message reception
+ * 
+ * Initiates PHY-level reception if receive state is idle and a buffer
+ * is available. Called periodically to monitor for incoming messages.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgReceive(pd_instance_t *pdInstance)
 {
     if (pdInstance->enableReceive == 0U)
@@ -435,6 +523,16 @@ void PD_MsgReceive(pd_instance_t *pdInstance)
     }
 }
 
+/**
+ * @brief Get message reception result
+ * 
+ * Checks if message reception has completed and processes the received
+ * message. Handles extended message chunking if enabled. Returns success
+ * status and prepares next reception.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return uint8_t 1 if message received successfully, 0 otherwise
+ */
 uint8_t PD_MsgGetReceiveResult(pd_instance_t *pdInstance)
 {
     uint8_t retVal = 0;
@@ -535,12 +633,31 @@ uint8_t PD_MsgGetReceiveResult(pd_instance_t *pdInstance)
     return retVal;
 }
 
+/**
+ * @brief Check if message reception is pending
+ * 
+ * Returns whether a receive operation has completed and is waiting
+ * to be processed by policy engine.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return uint8_t 1 if reception pending, 0 otherwise
+ */
 uint8_t PD_MsgRecvPending(pd_instance_t *pdInstance)
 {
     return (pdInstance->receiveState == 2U) ? 1U : 0U;
 }
 
 #if defined(PD_CONFIG_PD3_AMS_COLLISION_AVOID_ENABLE) && (PD_CONFIG_PD3_AMS_COLLISION_AVOID_ENABLE)
+/**
+ * @brief Start AMS as source (PD 3.0 collision avoidance)
+ * 
+ * Implements PD 3.0 AMS collision avoidance by setting Rp to 1.5A and
+ * waiting tSinkTx before starting source-initiated AMS. Only active
+ * when PD_CONFIG_PD3_AMS_COLLISION_AVOID_ENABLE is defined.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @return uint8_t 1 to start AMS, 0 to wait
+ */
 /* return 0 wait, 1 start */
 uint8_t PD_MsgSrcStartCommand(pd_instance_t *pdInstance)
 {
@@ -588,6 +705,15 @@ uint8_t PD_MsgSrcStartCommand(pd_instance_t *pdInstance)
     return 1;
 }
 
+/**
+ * @brief End AMS as source (PD 3.0 collision avoidance)
+ * 
+ * Restores Rp to 3.0A after completing source-initiated AMS, allowing
+ * sink to initiate messages again. Only active when collision avoidance
+ * is enabled.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ */
 void PD_MsgSrcEndCommand(pd_instance_t *pdInstance)
 {
     if ((pdInstance->commandSrcOwner != 0U) && (pdInstance->revision >= PD_SPEC_REVISION_30))
@@ -601,6 +727,17 @@ void PD_MsgSrcEndCommand(pd_instance_t *pdInstance)
     }
 }
 
+/**
+ * @brief Check if sink can start command (PD 3.0 collision avoidance)
+ * 
+ * Implements PD 3.0 sink-side AMS collision avoidance by checking if
+ * source's Rp is at 3.0A before initiating sink-originated AMS. Returns
+ * 0 if Rp is 1.5A (source owns AMS), 1 if safe to proceed.
+ * 
+ * @param[in] pdInstance PD instance pointer
+ * @param[in] command Command to be executed
+ * @return uint8_t 1 if allowed to start, 0 to wait
+ */
 uint8_t PD_MsgSnkCheckStartCommand(pd_instance_t *pdInstance, pd_command_t command)
 {
     if (pdInstance->revision >= PD_SPEC_REVISION_30)
